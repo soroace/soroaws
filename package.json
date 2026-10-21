@@ -10,7 +10,8 @@
   "main": "index.js",
   "scripts": {
     "start": "nodemon index.js",
-    "build": "pm2 start index.js -n soroaws --kill-timeout 150000 --log-date-format=\"YYYY-MM-DD HH:mm:ss\""
+    "build": "pm2 start index.js -n soroaws --kill-timeout 150000 --log-date-format=\"YYYY-MM-DD HH:mm:ss\"",
+    "test": "node --test"
   },
   "type": "commonjs",
   "repository": {

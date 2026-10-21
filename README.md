@@ -82,6 +82,9 @@ npm start
 
 # 生产模式（pm2 守护进程）
 npm run build
+
+# 单元测试（node:test）
+npm test
 ```
 
 PM2 管理命令：
@@ -147,12 +150,15 @@ IP 更换事件（`CHANGE` 级别）会额外单独记录到 `logs/changes.log` 
 soroaws/
 ├── index.js           # 入口：加载 src/app 并启动（pm2 启动路径不变）
 ├── src/
-│   ├── app.js         # 启动、轮次调度、清理、换 IP 流程、优雅退出
+│   ├── app.js         # 启动、轮次调度、清理、优雅退出
+│   ├── rotate.js      # 换 IP 流程（checkIp / 静态 IP 轮换 / 分配绑定）
+│   ├── limiter.js     # 按区域并发限制器
 │   ├── lightsail.js   # AWS Lightsail API 操作封装
 │   ├── checker.js     # 本机 Ping 连通性检测
 │   ├── config.js      # 配置管理（环境变量读取与校验）
 │   ├── logger.js      # 本地日志记录（写入 logs/）
 │   └── notifier.js    # 消息通知（Server酱，可选）
+├── test/              # 单元测试（node:test）
 ├── logs/              # 运行时日志（启动时自动创建，内容不入库）
 ├── .env.example       # 环境变量模板
 ├── package.json
