@@ -212,5 +212,4 @@ async function main() {
   }, config.interval * 60 * 1000);
 }
 
-// 由根目录 index.js 调用，保持入口路径不变（pm2 / npm 脚本无需调整）
 module.exports = { main };

@@ -1,8 +1,6 @@
 const fs = require("fs");
 const path = require("path");
 
-// 日志固定写入项目根目录的 logs/，与 logger.js 自身位置无关
-// （否则模块迁入 src/ 后 __dirname 变化，日志会被静默写到 src/ 下）
 const LOG_DIR = path.resolve(__dirname, "..", "logs");
 fs.mkdirSync(LOG_DIR, { recursive: true });
 

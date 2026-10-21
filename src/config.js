@@ -1,6 +1,5 @@
 const path = require("path");
 
-// 显式指向项目根目录的 .env：pm2/systemd 从其他工作目录启动时也能读到
 require("dotenv").config({ path: path.resolve(__dirname, "..", ".env") });
 
 const config = {
