@@ -97,17 +97,20 @@ pm2 stop soroaws        # 停止
 
 ## 日志
 
-所有日志统一写入项目根目录的 `soroaws.log` 文件，同时输出到控制台。
-IP 更换事件（`CHANGE` 级别）会额外单独记录到 `changes.log` 文件，便于快速检索更换历史。
+所有日志统一写入项目根目录的 `logs/soroaws.log` 文件，同时输出到控制台。
+IP 更换事件（`CHANGE` 级别）会额外单独记录到 `logs/changes.log` 文件，便于快速检索更换历史。
+
+> `logs/` 目录在启动时自动创建（不存在也没关系），内容不纳入 git。
+> 2026-09 之前版本使用的日志文件名为 `lightsail.log`，新版本不再使用。
 
 ### 日志级别
 
 | 级别 | 用途 | 筛选命令 |
 |------|------|----------|
-| `INFO` | 正常流程信息（检测开始、操作成功、汇总报告等） | `grep "\[INFO\]" soroaws.log` |
-| `WARN` | 警告（Ping 不通、AWS 限流重试等） | `grep "\[WARN\]" soroaws.log` |
-| `CHANGE` | IP 更换事件（记录实例名和 IP 变更） | `grep "\[CHANGE\]" soroaws.log` |
-| `ERROR` | 异常错误（API 调用失败等） | `grep "\[ERROR\]" soroaws.log` |
+| `INFO` | 正常流程信息（检测开始、操作成功、汇总报告等） | `grep "\[INFO\]" logs/soroaws.log` |
+| `WARN` | 警告（Ping 不通、AWS 限流重试等） | `grep "\[WARN\]" logs/soroaws.log` |
+| `CHANGE` | IP 更换事件（记录实例名和 IP 变更） | `grep "\[CHANGE\]" logs/soroaws.log` |
+| `ERROR` | 异常错误（API 调用失败等） | `grep "\[ERROR\]" logs/soroaws.log` |
 
 ### 日志示例
 
@@ -124,17 +127,34 @@ IP 更换事件（`CHANGE` 级别）会额外单独记录到 `changes.log` 文�
 [2026/6/3 12:02:34] [INFO] 本轮检查完成: 1 个可达, 1 个已更换, 0 个失败, 0 个跳过
 ```
 
+### 日志轮转
+
+日志不会自动清理，长期运行建议配置 logrotate（路径按实际部署目录替换）：
+
+```
+/path/to/soroaws/logs/*.log {
+    daily
+    rotate 14
+    compress
+    missingok
+    notifempty
+}
+```
+
 ## 项目结构
 
 ```
 soroaws/
-├── index.js       # 入口文件，业务流程编排
-├── config.js      # 配置管理（环境变量读取）
-├── lightsail.js   # AWS Lightsail API 操作封装
-├── checker.js     # 本机 Ping 连通性检测
-├── notifier.js    # 消息通知（Server酱）
-├── logger.js      # 本地日志记录
-├── .env.example   # 环境变量模板
+├── index.js           # 入口：加载 src/app 并启动（pm2 启动路径不变）
+├── src/
+│   ├── app.js         # 启动、轮次调度、清理、换 IP 流程、优雅退出
+│   ├── lightsail.js   # AWS Lightsail API 操作封装
+│   ├── checker.js     # 本机 Ping 连通性检测
+│   ├── config.js      # 配置管理（环境变量读取与校验）
+│   ├── logger.js      # 本地日志记录（写入 logs/）
+│   └── notifier.js    # 消息通知（Server酱，可选）
+├── logs/              # 运行时日志（启动时自动创建，内容不入库）
+├── .env.example       # 环境变量模板
 ├── package.json
 └── README.md
 ```
