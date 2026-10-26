@@ -154,3 +154,35 @@ test("静态 IP 实例走静态 IP 轮换流程", async () => {
   assert.equal(result.status, "changed");
   assert.equal(calls.rotate, 1);
 });
+
+test("纯 ping 模式：ping 通时不探测 TCP", async () => {
+  const account = { name: "main", check: { ...CHECK, mode: "ping", ports: [] } };
+  const { deps, calls } = makeDeps();
+
+  const result = await checkIp(account, "region-a", {}, makeServer("ping-mode-ok"), deps);
+
+  assert.equal(result.status, "reachable");
+  assert.equal(calls.tcp, 0);
+  assert.equal(calls.rotate, 0);
+});
+
+test("纯 ping 模式：ping 不通时触发换 IP", async () => {
+  const account = { name: "main", check: { ...CHECK, mode: "ping", ports: [] } };
+  const { deps, calls } = makeDeps({ pingResults: [false] });
+
+  const result = await checkIp(account, "region-a", {}, makeServer("ping-mode-fail"), deps);
+
+  assert.equal(result.status, "changed");
+  assert.equal(calls.tcp, 0);
+  assert.equal(calls.rotate, 1);
+});
+
+test("账号没有 check 配置时按纯 ping 处理", async () => {
+  const { deps, calls } = makeDeps();
+
+  const result = await checkIp({ name: "main" }, "region-a", {}, makeServer("no-check"), deps);
+
+  assert.equal(result.status, "reachable");
+  assert.equal(calls.tcp, 0);
+  assert.equal(calls.rotate, 0);
+});
