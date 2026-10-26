@@ -15,8 +15,9 @@ function systemPing(host, timeout) {
       ? `ping -n 1 -w ${timeout * 1000} ${host}`
       : `ping -c 1 -W ${timeout} ${host}`;
 
-    exec(cmd, (error) => {
-      // error 非空表示 ping 不通（退出码非0）
+    // 防御性超时：正常 ping 会自行退出，异常挂起时强制结束，避免卡死整轮检测
+    exec(cmd, { timeout: (timeout + 2) * 1000, killSignal: "SIGKILL" }, (error) => {
+      // error 非空表示 ping 不通（退出码非0）或子进程被强杀
       resolve(!error);
     });
   });
