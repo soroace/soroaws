@@ -117,3 +117,20 @@ test("loadAccounts 对非法 JSON 返回错误", () => {
     fs.unlinkSync(file);
   }
 });
+
+test("loadAccounts 兼容带 UTF-8 BOM 的文件", () => {
+  const file = writeTempJson(
+    "\uFEFF" +
+      JSON.stringify([
+        { name: "main", accessKeyId: "A", secretAccessKey: "S", regions: ["ap-northeast-1"] },
+      ])
+  );
+
+  try {
+    const { accounts, errors } = loadAccounts(file);
+    assert.deepEqual(errors, []);
+    assert.equal(accounts.length, 1);
+  } finally {
+    fs.unlinkSync(file);
+  }
+});

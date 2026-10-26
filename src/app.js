@@ -83,7 +83,7 @@ async function getInstances() {
       }
     }
 
-    const failureNote = failures > 0 ? `, ${failures} 个区域拉取失败` : "";
+    const failureNote = failures > 0 ? `, ${failures} 个账号/区域拉取失败` : "";
     log(
       "INFO",
       `本轮检查完成: ${stats.reachable} 个可达, ${stats.changed} 个已更换, ${stats.failed} 个失败, ${stats.skipped} 个跳过${failureNote}`
@@ -205,6 +205,7 @@ function logChannels() {
 async function main() {
   log("INFO", `soroaws 启动，检测间隔: ${config.interval} 分钟`);
   log("INFO", `探测方式: 本机持续 Ping 实例公网 IP，最长 ${config.pingTimeout} 秒，有任一回复即视为可达`);
+  log("INFO", `账号配置: ${config.accountsFile}`);
   log(
     "INFO",
     `已加载 ${config.accounts.length} 个账号（${config.accounts.map((a) => a.name).join(", ")}），共 ${clients.length} 个账号/区域客户端`

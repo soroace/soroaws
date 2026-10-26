@@ -98,7 +98,8 @@ function loadAccounts(filePath) {
 
   let raw;
   try {
-    raw = fs.readFileSync(file, "utf8");
+    // 去掉 UTF-8 BOM：Windows 记事本等编辑器保存的文件可能带 BOM，会让 JSON.parse 失败
+    raw = fs.readFileSync(file, "utf8").replace(/^\uFEFF+/, "");
   } catch (err) {
     return {
       accounts: [],
@@ -126,5 +127,4 @@ module.exports = {
   loadAccounts,
   normalizeAccounts,
   resolveAccountsFile,
-  DEFAULT_FILE,
 };

@@ -82,13 +82,13 @@ async function rotateStaticIp(account, region, client, server) {
   );
 
   if (activeStaticIpItem) {
-    log("INFO", `正在解绑静态 IP: ${activeStaticIpItem.name} (${activeStaticIpItem.ipAddress})`);
+    log("INFO", `[${account}/${region}] 正在解绑静态 IP: ${activeStaticIpItem.name} (${activeStaticIpItem.ipAddress})`);
     await detachStaticIp(client, activeStaticIpItem.name);
-    log("INFO", "解绑成功");
+    log("INFO", `[${account}/${region}] 解绑成功`);
 
-    log("INFO", `正在释放静态 IP: ${activeStaticIpItem.name} (${activeStaticIpItem.ipAddress})`);
+    log("INFO", `[${account}/${region}] 正在释放静态 IP: ${activeStaticIpItem.name} (${activeStaticIpItem.ipAddress})`);
     await releaseStaticIp(client, activeStaticIpItem.name);
-    log("INFO", "释放静态 IP 成功");
+    log("INFO", `[${account}/${region}] 释放静态 IP 成功`);
   } else {
     log("INFO", `${label} 的 ${oldIp} 未找到对应静态 IP，直接分配新 IP`);
   }
@@ -104,11 +104,11 @@ async function allocateAndAttach(account, region, client, server) {
   const oldIp = server.publicIpAddress;
   const staticIpName = `${server.name}-${Date.now()}`;
 
-  log("INFO", "正在创建新的静态 IP");
+  log("INFO", `[${account}/${region}] 正在创建新的静态 IP`);
   try {
     await allocateStaticIp(client, staticIpName);
   } catch (err) {
-    log("ERROR", `创建静态 IP 失败: ${err.message}`);
+    log("ERROR", `[${account}/${region}] 创建静态 IP 失败: ${err.message}`);
     await notifyIpChange({
       account,
       instanceName: server.name,
@@ -120,19 +120,19 @@ async function allocateAndAttach(account, region, client, server) {
     });
     throw err;
   }
-  log("INFO", "创建静态 IP 成功！");
+  log("INFO", `[${account}/${region}] 创建静态 IP 成功！`);
 
-  log("INFO", `正在绑定静态 IP ${staticIpName} 到实例 ${account}/${server.name}`);
+  log("INFO", `[${account}/${region}] 正在绑定静态 IP ${staticIpName} 到实例 ${server.name}`);
   try {
     await attachStaticIp(client, server.name, staticIpName);
   } catch (err) {
-    log("ERROR", `绑定静态 IP 失败: ${err.message}`);
+    log("ERROR", `[${account}/${region}] 绑定静态 IP 失败: ${err.message}`);
     // 回滚：释放刚分配但未绑定的静态 IP，避免产生闲置费用
     try {
       await releaseStaticIp(client, staticIpName);
-      log("INFO", `已回滚释放未绑定的静态 IP: ${staticIpName}`);
+      log("INFO", `[${account}/${region}] 已回滚释放未绑定的静态 IP: ${staticIpName}`);
     } catch (releaseErr) {
-      log("ERROR", `回滚释放静态 IP ${staticIpName} 失败: ${releaseErr.message}`);
+      log("ERROR", `[${account}/${region}] 回滚释放静态 IP ${staticIpName} 失败: ${releaseErr.message}`);
     }
     await notifyIpChange({
       account,
@@ -146,7 +146,7 @@ async function allocateAndAttach(account, region, client, server) {
     throw err;
   }
 
-  log("INFO", "绑定新 IP 成功！");
+  log("INFO", `[${account}/${region}] 绑定新 IP 成功！`);
 
   // 获取新 IP 的实际地址（查询实例最新公网 IP），失败时以 "-" 兜底
   let newIp = "-";
@@ -157,7 +157,7 @@ async function allocateAndAttach(account, region, client, server) {
       newIp = matched.publicIpAddress;
     }
   } catch (err) {
-    log("WARN", `获取新 IP 地址失败，请到 AWS 控制台确认: ${err.message}`);
+    log("WARN", `[${account}/${region}] 获取新 IP 地址失败，请到 AWS 控制台确认: ${err.message}`);
   }
 
   await notifyIpChange({

@@ -68,7 +68,7 @@ chmod 600 accounts.json
     "name": "main",
     "accessKeyId": "AKIA...",
     "secretAccessKey": "...",
-    "regions": ["ap-northeast-1", "ap-southeast-1"]
+    "regions": ["ap-northeast-1", "ap-northeast-2", "ap-southeast-1"]
   },
   {
     "name": "backup",

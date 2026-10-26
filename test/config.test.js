@@ -80,3 +80,12 @@ test("合法配置通过校验", () => {
 
   assert.deepEqual(errors, []);
 });
+
+test("没有账号且无解析错误时仍报错", () => {
+  const errors = withConfig(
+    { accounts: [], accountsErrors: [], ...validNumbers },
+    () => config.validateConfig()
+  );
+
+  assert.ok(errors.some((e) => e.includes("未配置任何账号")));
+});
