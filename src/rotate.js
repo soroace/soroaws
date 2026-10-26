@@ -35,6 +35,13 @@ const DEFAULT_DEPS = {
   rotateStaticIp,
   allocateAndAttach,
   getRegionLimiter,
+  fetchInstances,
+  fetchStaticIps,
+  detachStaticIp,
+  releaseStaticIp,
+  allocateStaticIp,
+  attachStaticIp,
+  notifyIpChange,
   log,
 };
 
@@ -46,9 +53,9 @@ async function rotateIp(account, region, client, server, label, host, deps) {
     const runRotate = deps.getRegionLimiter(client);
     await runRotate(async () => {
       if (server.isStaticIp) {
-        await deps.rotateStaticIp(account, region, client, server);
+        await deps.rotateStaticIp(account, region, client, server, deps);
       } else {
-        await deps.allocateAndAttach(account, region, client, server);
+        await deps.allocateAndAttach(account, region, client, server, deps);
       }
     });
     return { server, status: "changed" };
@@ -170,13 +177,14 @@ async function checkIp(accountConfig, region, client, server, overrides = {}) {
 
 /**
  * 处理已有静态 IP 的实例：解绑旧 IP → 释放旧 IP → 分配新 IP → 绑定新 IP
+ * @param {object} [deps] - 依赖覆盖（测试用）
  */
-async function rotateStaticIp(account, region, client, server) {
+async function rotateStaticIp(account, region, client, server, deps = DEFAULT_DEPS) {
   const label = `${account}/${server.name}`;
 
-  log("INFO", `[${account}/${region}] 正在获取区域所有静态 IP 列表`);
-  const staticIps = await fetchStaticIps(client);
-  log("INFO", `[${account}/${region}] 获取区域所有静态 IP 列表成功`);
+  deps.log("INFO", `[${account}/${region}] 正在获取区域所有静态 IP 列表`);
+  const staticIps = await deps.fetchStaticIps(client);
+  deps.log("INFO", `[${account}/${region}] 获取区域所有静态 IP 列表成功`);
 
   const oldIp = server.publicIpAddress;
   const activeStaticIpItem = staticIps.find(
@@ -184,34 +192,35 @@ async function rotateStaticIp(account, region, client, server) {
   );
 
   if (activeStaticIpItem) {
-    log("INFO", `[${account}/${region}] 正在解绑静态 IP: ${activeStaticIpItem.name} (${activeStaticIpItem.ipAddress})`);
-    await detachStaticIp(client, activeStaticIpItem.name);
-    log("INFO", `[${account}/${region}] 解绑成功`);
+    deps.log("INFO", `[${account}/${region}] 正在解绑静态 IP: ${activeStaticIpItem.name} (${activeStaticIpItem.ipAddress})`);
+    await deps.detachStaticIp(client, activeStaticIpItem.name);
+    deps.log("INFO", `[${account}/${region}] 解绑成功`);
 
-    log("INFO", `[${account}/${region}] 正在释放静态 IP: ${activeStaticIpItem.name} (${activeStaticIpItem.ipAddress})`);
-    await releaseStaticIp(client, activeStaticIpItem.name);
-    log("INFO", `[${account}/${region}] 释放静态 IP 成功`);
+    deps.log("INFO", `[${account}/${region}] 正在释放静态 IP: ${activeStaticIpItem.name} (${activeStaticIpItem.ipAddress})`);
+    await deps.releaseStaticIp(client, activeStaticIpItem.name);
+    deps.log("INFO", `[${account}/${region}] 释放静态 IP 成功`);
   } else {
-    log("INFO", `${label} 的 ${oldIp} 未找到对应静态 IP，直接分配新 IP`);
+    deps.log("INFO", `${label} 的 ${oldIp} 未找到对应静态 IP，直接分配新 IP`);
   }
 
-  await allocateAndAttach(account, region, client, server);
+  await allocateAndAttach(account, region, client, server, deps);
 }
 
 /**
  * 分配新静态 IP 并绑定到实例
  * 成功时发送成功通知，失败时发送失败告警并抛出异常
+ * @param {object} [deps] - 依赖覆盖（测试用）
  */
-async function allocateAndAttach(account, region, client, server) {
+async function allocateAndAttach(account, region, client, server, deps = DEFAULT_DEPS) {
   const oldIp = server.publicIpAddress;
   const staticIpName = `${server.name}-${Date.now()}`;
 
-  log("INFO", `[${account}/${region}] 正在创建新的静态 IP`);
+  deps.log("INFO", `[${account}/${region}] 正在创建新的静态 IP`);
   try {
-    await allocateStaticIp(client, staticIpName);
+    await deps.allocateStaticIp(client, staticIpName);
   } catch (err) {
-    log("ERROR", `[${account}/${region}] 创建静态 IP 失败: ${err.message}`);
-    await notifyIpChange({
+    deps.log("ERROR", `[${account}/${region}] 创建静态 IP 失败: ${err.message}`);
+    await deps.notifyIpChange({
       account,
       instanceName: server.name,
       region,
@@ -222,21 +231,21 @@ async function allocateAndAttach(account, region, client, server) {
     });
     throw err;
   }
-  log("INFO", `[${account}/${region}] 创建静态 IP 成功！`);
+  deps.log("INFO", `[${account}/${region}] 创建静态 IP 成功！`);
 
-  log("INFO", `[${account}/${region}] 正在绑定静态 IP ${staticIpName} 到实例 ${server.name}`);
+  deps.log("INFO", `[${account}/${region}] 正在绑定静态 IP ${staticIpName} 到实例 ${server.name}`);
   try {
-    await attachStaticIp(client, server.name, staticIpName);
+    await deps.attachStaticIp(client, server.name, staticIpName);
   } catch (err) {
-    log("ERROR", `[${account}/${region}] 绑定静态 IP 失败: ${err.message}`);
+    deps.log("ERROR", `[${account}/${region}] 绑定静态 IP 失败: ${err.message}`);
     // 回滚：释放刚分配但未绑定的静态 IP，避免产生闲置费用
     try {
-      await releaseStaticIp(client, staticIpName);
-      log("INFO", `[${account}/${region}] 已回滚释放未绑定的静态 IP: ${staticIpName}`);
+      await deps.releaseStaticIp(client, staticIpName);
+      deps.log("INFO", `[${account}/${region}] 已回滚释放未绑定的静态 IP: ${staticIpName}`);
     } catch (releaseErr) {
-      log("ERROR", `[${account}/${region}] 回滚释放静态 IP ${staticIpName} 失败: ${releaseErr.message}`);
+      deps.log("ERROR", `[${account}/${region}] 回滚释放静态 IP ${staticIpName} 失败: ${releaseErr.message}`);
     }
-    await notifyIpChange({
+    await deps.notifyIpChange({
       account,
       instanceName: server.name,
       region,
@@ -248,21 +257,21 @@ async function allocateAndAttach(account, region, client, server) {
     throw err;
   }
 
-  log("INFO", `[${account}/${region}] 绑定新 IP 成功！`);
+  deps.log("INFO", `[${account}/${region}] 绑定新 IP 成功！`);
 
   // 获取新 IP 的实际地址（查询实例最新公网 IP），失败时以 "-" 兜底
   let newIp = "-";
   try {
-    const servers = await fetchInstances(client);
+    const servers = await deps.fetchInstances(client);
     const matched = servers.find((s) => s.name === server.name);
     if (matched && matched.publicIpAddress) {
       newIp = matched.publicIpAddress;
     }
   } catch (err) {
-    log("WARN", `[${account}/${region}] 获取新 IP 地址失败，请到 AWS 控制台确认: ${err.message}`);
+    deps.log("WARN", `[${account}/${region}] 获取新 IP 地址失败，请到 AWS 控制台确认: ${err.message}`);
   }
 
-  await notifyIpChange({
+  await deps.notifyIpChange({
     account,
     instanceName: server.name,
     region,
