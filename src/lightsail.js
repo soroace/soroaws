@@ -10,17 +10,20 @@ const {
 const config = require("./config");
 const { log } = require("./logger");
 
-// 每个区域一个客户端，连同区域名一起导出
-// （日志与告警需要区域名，而 AWS SDK v3 的 client.config.region 是 provider 函数，取不到字符串）
+// 每个「账号 × 区域」一个客户端，连同账号名、区域名一起导出
+// （日志与告警需要账号/区域名，而 AWS SDK v3 的 client.config.region 是 provider 函数，取不到字符串）
 // 客户端自身配置 SDK 内置重试（最多 3 次，指数退避）
-const clients = config.regions.map((region) => ({
-  region,
-  client: new LightsailClient({
+const clients = config.accounts.flatMap((account) =>
+  account.regions.map((region) => ({
+    account: account.name,
     region,
-    credentials: config.credentials,
-    maxAttempts: 3,
-  }),
-}));
+    client: new LightsailClient({
+      region,
+      credentials: account.credentials,
+      maxAttempts: 3,
+    }),
+  }))
+);
 
 // 单个 API 调用的最大尝试次数（首次 + 重试），重试采用指数退避
 const MAX_ATTEMPTS = 3;

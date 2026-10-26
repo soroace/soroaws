@@ -8,17 +8,17 @@ const config = require("./config");
 // ============================================================
 
 /**
- * 并发获取所有区域的实例列表，失败区域记录错误日志
- * @returns {Promise<{instances: Array, failures: number}>} instances: [{region, client, server}]
+ * 并发获取所有账号/区域的实例列表，失败区域记录错误日志
+ * @returns {Promise<{instances: Array, failures: number}>} instances: [{account, region, client, server}]
  */
 async function fetchAllInstances() {
   const results = await Promise.all(
-    clients.map(async ({ region, client }) => {
+    clients.map(async ({ account, region, client }) => {
       try {
-        return { region, client, ok: true, servers: await fetchInstances(client) };
+        return { account, region, client, ok: true, servers: await fetchInstances(client) };
       } catch (err) {
-        log("ERROR", `获取实例列表失败 (${region}): ${err.message}`);
-        return { region, ok: false };
+        log("ERROR", `获取实例列表失败 (${account}/${region}): ${err.message}`);
+        return { account, region, ok: false };
       }
     })
   );
@@ -29,7 +29,12 @@ async function fetchAllInstances() {
   for (const result of results) {
     if (result.ok) {
       for (const server of result.servers) {
-        instances.push({ region: result.region, client: result.client, server });
+        instances.push({
+          account: result.account,
+          region: result.region,
+          client: result.client,
+          server,
+        });
       }
     } else {
       failures++;
@@ -53,7 +58,6 @@ async function getInstances() {
   roundRunning = true;
 
   try {
-    // 清理放在轮次开头：此刻没有在途换 IP，与换 IP 天然互斥（理由见 maybeCleanup）
     await maybeCleanup();
 
     log("INFO", "开始新一轮 IP 检查");
@@ -64,9 +68,10 @@ async function getInstances() {
       log("WARN", "未获取到任何实例");
     }
 
-    // 逐个检测，不可达的自动更换
     const checkResults = await Promise.allSettled(
-      instances.map(({ region, client, server }) => checkIp(region, client, server))
+      instances.map(({ account, region, client, server }) =>
+        checkIp(account, region, client, server)
+      )
     );
 
     const stats = { reachable: 0, changed: 0, failed: 0, skipped: 0 };
@@ -89,15 +94,15 @@ async function getInstances() {
 }
 
 /**
- * 清理所有区域的未附加静态 IP
+ * 清理所有账号/区域的未附加静态 IP
  */
 async function cleanupAllRegions() {
   log("INFO", "开始检查未附加静态 IP");
-  for (const { region, client } of clients) {
+  for (const { account, region, client } of clients) {
     try {
       await cleanupUnattachedIps(client);
     } catch (err) {
-      log("ERROR", `清理未附加 IP 异常 (${region}): ${err.message}`);
+      log("ERROR", `清理未附加 IP 异常 (${account}/${region}): ${err.message}`);
     }
   }
 }
@@ -131,7 +136,7 @@ const configErrors = config.validateConfig();
 if (configErrors.length > 0) {
   log("ERROR", "配置校验失败:");
   configErrors.forEach((err) => log("ERROR", `  - ${err}`));
-  log("ERROR", "请检查 .env 文件或环境变量后重试");
+  log("ERROR", "请检查 accounts.json 或 .env 后重试");
   process.exit(1);
 }
 
@@ -200,6 +205,10 @@ function logChannels() {
 async function main() {
   log("INFO", `soroaws 启动，检测间隔: ${config.interval} 分钟`);
   log("INFO", `探测方式: 本机持续 Ping 实例公网 IP，最长 ${config.pingTimeout} 秒，有任一回复即视为可达`);
+  log(
+    "INFO",
+    `已加载 ${config.accounts.length} 个账号（${config.accounts.map((a) => a.name).join(", ")}），共 ${clients.length} 个账号/区域客户端`
+  );
   logChannels();
 
   // 启动时先清理一次未附加静态 IP

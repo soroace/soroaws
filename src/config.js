@@ -2,26 +2,15 @@ const path = require("path");
 
 require("dotenv").config({ path: path.resolve(__dirname, "..", ".env") });
 
-const config = {
-  // AWS 区域（多个用逗号分隔，如 "ap-northeast-1,us-east-1"）
-  // 去重并剔除空项：尾随逗号、连续逗号（如 "ap-northeast-1,"）会产生空字符串，
-  // 而空区域名会让 LightsailClient 构造时抛 "Region is missing"，
-  // 使进程在校验之前就崩掉；重复区域则会生成两个同区域客户端，
-  // 导致同一实例被重复检查、甚至并发换 IP（限流器按客户端而非区域隔离，挡不住）
-  regions: [
-    ...new Set(
-      (process.env.AWS_REGIONS || "ap-northeast-1")
-        .split(",")
-        .map((r) => r.trim())
-        .filter(Boolean)
-    ),
-  ],
+const { loadAccounts } = require("./accounts");
 
-  // AWS 凭证
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
-  },
+const accountsResult = loadAccounts(process.env.AWS_ACCOUNTS_FILE);
+
+const config = {
+  // AWS 账号（accounts.json），每个账号可配置多个区域
+  accounts: accountsResult.accounts,
+  accountsFile: accountsResult.file,
+  accountsErrors: accountsResult.errors,
 
   // 本机 Ping 实例公网 IP 的检测总时长（秒），默认 15（期间持续 Ping，有任一回复即视为可达）
   pingTimeout: parseInt(process.env.PING_TIMEOUT || "15", 10),
@@ -44,22 +33,8 @@ const config = {
  * @returns {string[]} 错误信息数组，为空则配置正常
  */
 function validateConfig() {
-  const errors = [];
+  const errors = [...config.accountsErrors];
 
-  if (!config.credentials.accessKeyId) {
-    errors.push("AWS_ACCESS_KEY_ID 未设置");
-  }
-  if (!config.credentials.secretAccessKey) {
-    errors.push("AWS_SECRET_ACCESS_KEY 未设置");
-  }
-  if (config.regions.length === 0) {
-    errors.push("AWS_REGIONS 未设置或格式不正确");
-  }
-  // 区域名格式校验：挡掉大小写错误、下划线、缺段等手误（如 ap_northeast_1、ap-northeast）
-  const invalidRegion = config.regions.find((r) => !/^[a-z]{2}(-[a-z]+)+-\d+$/.test(r));
-  if (invalidRegion) {
-    errors.push(`AWS_REGIONS 含无效区域名 "${invalidRegion}"，应形如 ap-northeast-1`);
-  }
   if (Number.isNaN(config.pingTimeout) || config.pingTimeout < 1) {
     errors.push("PING_TIMEOUT 不是有效的数字");
   }

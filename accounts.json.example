@@ -1,0 +1,14 @@
+[
+  {
+    "name": "main",
+    "accessKeyId": "YOUR_ACCESS_KEY_ID",
+    "secretAccessKey": "YOUR_SECRET_ACCESS_KEY",
+    "regions": ["ap-northeast-1", "ap-southeast-1"]
+  },
+  {
+    "name": "backup",
+    "accessKeyId": "YOUR_BACKUP_ACCESS_KEY_ID",
+    "secretAccessKey": "YOUR_BACKUP_SECRET_ACCESS_KEY",
+    "regions": ["us-east-1"]
+  }
+]

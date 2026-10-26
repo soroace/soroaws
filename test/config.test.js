@@ -5,16 +5,16 @@ const config = require("../src/config");
 /** 临时修改配置并自动还原，避免测试之间互相影响 */
 function withConfig(patch, fn) {
   const saved = {
-    credentials: { ...config.credentials },
-    regions: [...config.regions],
+    accounts: config.accounts,
+    accountsErrors: config.accountsErrors,
     pingTimeout: config.pingTimeout,
     interval: config.interval,
     rotateConcurrency: config.rotateConcurrency,
     shutdownGraceSec: config.shutdownGraceSec,
   };
 
-  config.credentials = { ...saved.credentials, ...(patch.credentials || {}) };
-  config.regions = patch.regions ? [...patch.regions] : saved.regions;
+  if (patch.accounts !== undefined) config.accounts = patch.accounts;
+  if (patch.accountsErrors !== undefined) config.accountsErrors = patch.accountsErrors;
   for (const key of ["pingTimeout", "interval", "rotateConcurrency", "shutdownGraceSec"]) {
     if (patch[key] !== undefined) config[key] = patch[key];
   }
@@ -22,8 +22,8 @@ function withConfig(patch, fn) {
   try {
     return fn();
   } finally {
-    config.credentials = saved.credentials;
-    config.regions = saved.regions;
+    config.accounts = saved.accounts;
+    config.accountsErrors = saved.accountsErrors;
     config.pingTimeout = saved.pingTimeout;
     config.interval = saved.interval;
     config.rotateConcurrency = saved.rotateConcurrency;
@@ -31,43 +31,52 @@ function withConfig(patch, fn) {
   }
 }
 
-test("缺少 AWS 凭证时报错", () => {
+const validAccount = {
+  name: "main",
+  credentials: { accessKeyId: "AKIAEXAMPLE", secretAccessKey: "example-secret" },
+  regions: ["ap-northeast-1"],
+};
+
+const validNumbers = {
+  pingTimeout: 15,
+  interval: 1,
+  rotateConcurrency: 2,
+  shutdownGraceSec: 120,
+};
+
+test("账号配置错误会透传到校验结果", () => {
   const errors = withConfig(
-    { credentials: { accessKeyId: "", secretAccessKey: "" } },
+    { accounts: [], accountsErrors: ["无法读取账号配置文件"], ...validNumbers },
     () => config.validateConfig()
   );
 
-  assert.ok(errors.some((e) => e.includes("AWS_ACCESS_KEY_ID")));
-  assert.ok(errors.some((e) => e.includes("AWS_SECRET_ACCESS_KEY")));
+  assert.ok(errors.some((e) => e.includes("无法读取账号配置文件")));
 });
 
-test("非法区域名报错", () => {
-  const errors = withConfig({ regions: ["ap_northeast_1", "AP-NORTHEAST-1"] }, () =>
-    config.validateConfig()
-  );
-
-  assert.equal(errors.filter((e) => e.includes("无效区域名")).length, 1);
-});
-
-test("合法配置通过校验", () => {
+test("数值配置非法时报错", () => {
   const errors = withConfig(
     {
-      credentials: { accessKeyId: "AKIAEXAMPLE", secretAccessKey: "example-secret" },
-      regions: ["ap-northeast-1", "ap-southeast-1"],
-      pingTimeout: 15,
-      interval: 1,
-      rotateConcurrency: 2,
-      shutdownGraceSec: 120,
+      accounts: [validAccount],
+      accountsErrors: [],
+      pingTimeout: 0,
+      interval: 0,
+      rotateConcurrency: 0,
+      shutdownGraceSec: 0,
     },
     () => config.validateConfig()
   );
 
-  assert.deepEqual(errors, []);
-});
-
-test("探测时长/间隔非正数时报错", () => {
-  const errors = withConfig({ pingTimeout: 0, interval: 0 }, () => config.validateConfig());
-
   assert.ok(errors.some((e) => e.includes("PING_TIMEOUT")));
   assert.ok(errors.some((e) => e.includes("CHECK_INTERVAL_MIN")));
+  assert.ok(errors.some((e) => e.includes("ROTATE_CONCURRENCY")));
+  assert.ok(errors.some((e) => e.includes("SHUTDOWN_GRACE_SEC")));
+});
+
+test("合法配置通过校验", () => {
+  const errors = withConfig(
+    { accounts: [validAccount], accountsErrors: [], ...validNumbers },
+    () => config.validateConfig()
+  );
+
+  assert.deepEqual(errors, []);
 });

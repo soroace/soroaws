@@ -23,7 +23,7 @@
 ## 前置要求
 
 - Node.js 20 LTS+
-- AWS 账号及 [IAM 访问密钥](https://console.aws.amazon.com/iam/home?region=ap-northeast-1#/security_credentials)
+- 一个或多个 AWS 账号及对应 [IAM 访问密钥](https://console.aws.amazon.com/iam/home?region=ap-northeast-1#/security_credentials)
 - 实例防火墙放行 ICMP（否则 Ping 探测会误判为被阻断）
 - pm2（推荐生产使用）
 
@@ -44,25 +44,62 @@ cd soroaws
 # 3. 安装依赖
 npm install
 
-# 4. 配置环境变量
+# 4. 配置
 cp .env.example .env
-# 编辑 .env 填入你的 AWS 凭证和配置
+cp accounts.json.example accounts.json
+chmod 600 accounts.json
+# 编辑 .env（运行参数）和 accounts.json（AWS 账号）后启动
 ```
 
 ## 配置
 
-通过环境变量配置，支持 `.env` 文件：
+运行参数通过 `.env` 配置；AWS 账号（可多个）通过 `accounts.json` 配置。
+
+### accounts.json
+
+```bash
+cp accounts.json.example accounts.json
+chmod 600 accounts.json
+```
+
+```json
+[
+  {
+    "name": "main",
+    "accessKeyId": "AKIA...",
+    "secretAccessKey": "...",
+    "regions": ["ap-northeast-1", "ap-southeast-1"]
+  },
+  {
+    "name": "backup",
+    "accessKeyId": "AKIA...",
+    "secretAccessKey": "...",
+    "regions": ["us-east-1"]
+  }
+]
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `name` | 是 | 账号标识，唯一，用于日志/通知；1-32 位字母/数字/下划线/连字符 |
+| `accessKeyId` | 是 | AWS 访问密钥 ID |
+| `secretAccessKey` | 是 | AWS 秘密访问密钥 |
+| `regions` | 是 | 该账号要检测的区域数组，如 `["ap-northeast-1"]` |
+
+> 每个「账号 + 区域」独立创建 AWS 客户端；换 IP 并发限制按「账号 + 区域」分别计算。
+> 账号必须是不同的 AWS 账号——同一账号的多套密钥会重复检测同一批实例并并发换 IP。
+> `accounts.json` 含密钥，不要提交到 git；可用 `AWS_ACCOUNTS_FILE` 指定其他路径。
+
+### .env
 
 | 变量 | 必填 | 默认值 | 说明 |
 |------|------|--------|------|
-| `AWS_ACCESS_KEY_ID` | 是 | - | AWS 访问密钥 ID |
-| `AWS_SECRET_ACCESS_KEY` | 是 | - | AWS 秘密访问密钥 |
-| `AWS_REGIONS` | 否 | `ap-northeast-1` | AWS 区域，多个用逗号分隔 |
 | `PING_TIMEOUT` | 否 | `15` | 探测总时长（秒），期间持续 Ping，全部无回复才算不通 |
 | `CHECK_INTERVAL_MIN` | 否 | `1` | 检测间隔（分钟） |
-| `ROTATE_CONCURRENCY` | 否 | `2` | 同一区域并行更换 IP 的最大并发数 |
+| `ROTATE_CONCURRENCY` | 否 | `2` | 同一账号+区域并行更换 IP 的最大并发数 |
 | `SHUTDOWN_GRACE_SEC` | 否 | `120` | 退出前等待在途换 IP 等操作完成的最长时间（秒） |
 | `SERVER_CHAN_TOKEN` | 否 | - | Server酱 推送 Token（留空不推送） |
+| `AWS_ACCOUNTS_FILE` | 否 | `accounts.json` | 账号配置文件路径（相对项目根或绝对路径） |
 
 ## 通知
 
@@ -105,6 +142,7 @@ IP 更换事件（`CHANGE` 级别）会额外单独记录到 `logs/changes.log` 
 
 > `logs/` 目录在启动时自动创建（不存在也没关系），内容不纳入 git。
 > 2026-09 之前版本使用的日志文件名为 `lightsail.log`，新版本不再使用。
+> 多账号时，日志里的实例名带账号前缀，形如 `main/my-instance`。
 
 ### 日志级别
 
@@ -149,13 +187,16 @@ IP 更换事件（`CHANGE` 级别）会额外单独记录到 `logs/changes.log` 
 ```
 soroaws/
 ├── index.js           # 入口：加载 src/app 并启动（pm2 启动路径不变）
+├── accounts.json      # AWS 账号配置（含密钥，不入库，部署时创建）
+├── accounts.json.example  # 账号配置模板
 ├── src/
 │   ├── app.js         # 启动、轮次调度、清理、优雅退出
+│   ├── accounts.js    # AWS 账号配置读取与校验
 │   ├── rotate.js      # 换 IP 流程（checkIp / 静态 IP 轮换 / 分配绑定）
-│   ├── limiter.js     # 按区域并发限制器
+│   ├── limiter.js     # 按「账号 + 区域」并发限制器
 │   ├── lightsail.js   # AWS Lightsail API 操作封装
 │   ├── checker.js     # 本机 Ping 连通性检测
-│   ├── config.js      # 配置管理（环境变量读取与校验）
+│   ├── config.js      # 运行参数读取与校验
 │   ├── logger.js      # 本地日志记录（写入 logs/）
 │   └── notifier.js    # 消息通知（Server酱，可选）
 ├── test/              # 单元测试（node:test）
