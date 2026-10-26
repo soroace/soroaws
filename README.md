@@ -18,6 +18,8 @@
 
 在部署主机（国内服务器）上**持续 Ping 实例的公网 IP**：`PING_TIMEOUT` 秒内不断探测，有任一次回复即判定链路正常，全部无回复才判定被阻断。
 
+默认只测 ICMP；如需覆盖"ping 通但 TCP 端口不可用"的情况，可在账号 `check` 中开启 `ping+tcp`（见配置章节）。
+
 > 该方式依赖 ICMP。请确保实例侧放行 ICMP、且本机网络不屏蔽 ICMP，否则会出现误判。
 
 ## 前置要求
@@ -113,11 +115,12 @@ chmod 600 accounts.json
 | `mode` | `ping` | `ping`（只测 ICMP）或 `ping+tcp`（ping 通后再测 TCP） |
 | `ports` | - | 启用 TCP 检测时必填；单个端口如 `[22]`，多个端口如 `[22, 443]`；1-65535 整数，任一端口握手成功即算 TCP 通 |
 | `tcpTimeoutMs` | `3000` | 单个端口的连接超时（100-30000） |
-| `confirmRounds` | `2` | 连续多少轮 TCP 无响应才触发换 IP（1-10） |
+| `confirmRounds` | `2` | 连续多少轮 TCP 无响应才达到换 IP 阈值（仅在 `rotateOnTcpDown: true` 时生效，1-10） |
 | `rotateOnTcpDown` | `false` | 是否允许因 TCP 无响应而换 IP；建议先 false 观察 24 小时再开启 |
 
-> TCP 结果区分两种情况：端口返回 `ECONNREFUSED`（服务没监听，**不换 IP**）和连接超时/无响应（疑似封锁，连续 `confirmRounds` 轮才换）。
+> TCP 结果区分两种情况：端口返回 `ECONNREFUSED`（服务没监听，**不换 IP**）和连接超时/无响应（疑似封锁，需 `rotateOnTcpDown: true` 且连续 `confirmRounds` 轮才换）。
 > 端口建议填业务实际端口（如 SSH `22` 或代理端口）；多个端口写成数组 `"ports": [22, 443]`，任一成功即算通；如果只想检测某个业务端口，只填那一个。
+> 用 22 端口探测时，连接后立即断开会在实例 sshd 留下 `Did not receive identification string` 类日志，部分 fail2ban 规则可能因此封禁监控机 IP；建议改用业务端口，或将监控机 IP 加入实例的 fail2ban 白名单。
 > 观察到 "Ping 通但 TCP 无响应" 日志后，建议先对照实例的实际可用性确认误报情况，再决定是否开启 `rotateOnTcpDown`。
 
 ### .env

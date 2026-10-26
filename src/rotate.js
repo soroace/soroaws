@@ -28,22 +28,32 @@ function pruneTcpFailureStreaks(activeKeys) {
   }
 }
 
+// 默认依赖（测试时可注入替身，避免真实网络与 AWS 调用）
+const DEFAULT_DEPS = {
+  pingHost,
+  probeTcpPorts,
+  rotateStaticIp,
+  allocateAndAttach,
+  getRegionLimiter,
+  log,
+};
+
 /**
  * 执行换 IP（经区域限流器排队）
  */
-async function rotateIp(account, region, client, server, label, host) {
+async function rotateIp(account, region, client, server, label, host, deps) {
   try {
-    const runRotate = getRegionLimiter(client);
+    const runRotate = deps.getRegionLimiter(client);
     await runRotate(async () => {
       if (server.isStaticIp) {
-        await rotateStaticIp(account, region, client, server);
+        await deps.rotateStaticIp(account, region, client, server);
       } else {
-        await allocateAndAttach(account, region, client, server);
+        await deps.allocateAndAttach(account, region, client, server);
       }
     });
     return { server, status: "changed" };
   } catch (err) {
-    log("ERROR", `${label} (${host}) IP更换失败: ${err.message}`);
+    deps.log("ERROR", `${label} (${host}) IP更换失败: ${err.message}`);
     return { server, status: "failed" };
   }
 }
@@ -55,57 +65,63 @@ async function rotateIp(account, region, client, server, label, host) {
  * @param {string} region - 区域
  * @param {object} client - 该账号/区域的 AWS 客户端
  * @param {object} server - 实例对象
+ * @param {object} [overrides] - 依赖覆盖（测试用）
  * @returns {Promise<{server: object, status: "reachable"|"changed"|"failed"|"skipped"}>}
  */
-async function checkIp(accountConfig, region, client, server) {
+async function checkIp(accountConfig, region, client, server, overrides = {}) {
+  const deps = { ...DEFAULT_DEPS, ...overrides };
   const account = accountConfig.name;
   const check = accountConfig.check || DEFAULT_CHECK;
   const host = server.publicIpAddress;
   const instanceState = server.state?.name || "未知";
   const label = `${account}/${server.name}`;
+  const key = `${account}|${region}|${server.name}`;
 
   // 已停止/无公网 IP 的实例 Ping 必然失败，直接跳过，不触发换 IP
   if (!host || instanceState !== "running") {
-    log("INFO", `${label} 状态为 ${instanceState}${host ? "" : "、无公网 IP"}，跳过检测`);
+    deps.log(
+      "INFO",
+      `${label} 状态为 ${instanceState}${host ? "" : "、无公网 IP"}，跳过检测`
+    );
     return { server, status: "skipped" };
   }
 
-  log("INFO", `正在检查 ${label} (${host}) 连通性`);
+  deps.log("INFO", `正在检查 ${label} (${host}) 连通性`);
 
   let pingReachable;
   try {
-    pingReachable = await pingHost(host, config.pingTimeout);
+    pingReachable = await deps.pingHost(host, config.pingTimeout);
   } catch (err) {
-    log("ERROR", `${label} (${host}) 连通性检测异常: ${err.message}`);
+    deps.log("ERROR", `${label} (${host}) 连通性检测异常: ${err.message}`);
     return { server, status: "failed" };
   }
 
   // 纯 ping 模式：与原行为完全一致
   if (check.mode === "ping") {
     if (pingReachable) {
-      log("INFO", `${label} (${host}) Ping 通，跳过本轮检测`);
+      deps.log("INFO", `${label} (${host}) Ping 通，跳过本轮检测`);
       return { server, status: "reachable" };
     }
 
-    log("WARN", `${label} (${host}) 持续 ${config.pingTimeout} 秒 Ping 无回复`);
-    log("INFO", `${label} (${host}) 判定为不可达，开始更换 IP`);
-    return rotateIp(account, region, client, server, label, host);
+    deps.log("WARN", `${label} (${host}) 持续 ${config.pingTimeout} 秒 Ping 无回复`);
+    deps.log("INFO", `${label} (${host}) 判定为不可达，开始更换 IP`);
+    tcpFailureStreaks.delete(key);
+    return rotateIp(account, region, client, server, label, host, deps);
   }
 
   // ping+tcp 模式：ping 不通时沿用原逻辑（直接换 IP）
   if (!pingReachable) {
-    log("WARN", `${label} (${host}) 持续 ${config.pingTimeout} 秒 Ping 无回复`);
-    log("INFO", `${label} (${host}) 判定为不可达，开始更换 IP`);
-    return rotateIp(account, region, client, server, label, host);
+    deps.log("WARN", `${label} (${host}) 持续 ${config.pingTimeout} 秒 Ping 无回复`);
+    deps.log("INFO", `${label} (${host}) 判定为不可达，开始更换 IP`);
+    tcpFailureStreaks.delete(key);
+    return rotateIp(account, region, client, server, label, host, deps);
   }
-
-  const key = `${account}|${region}|${server.name}`;
 
   let tcpResults;
   try {
-    tcpResults = await probeTcpPorts(host, check.ports, check.tcpTimeoutMs);
+    tcpResults = await deps.probeTcpPorts(host, check.ports, check.tcpTimeoutMs);
   } catch (err) {
-    log("ERROR", `${label} (${host}) TCP 探测异常，本轮不换 IP: ${err.message}`);
+    deps.log("ERROR", `${label} (${host}) TCP 探测异常，本轮不换 IP: ${err.message}`);
     return { server, status: "reachable" };
   }
 
@@ -113,13 +129,13 @@ async function checkIp(accountConfig, region, client, server) {
 
   if (verdict === VERDICT.OK) {
     tcpFailureStreaks.delete(key);
-    log("INFO", `${label} (${host}) Ping 通，TCP 正常，跳过本轮检测`);
+    deps.log("INFO", `${label} (${host}) Ping 通，TCP 正常，跳过本轮检测`);
     return { server, status: "reachable" };
   }
 
   if (verdict === VERDICT.REFUSED) {
     tcpFailureStreaks.delete(key);
-    log(
+    deps.log(
       "WARN",
       `${label} (${host}) Ping 通但 TCP(${check.ports.join(",")}) 全部被拒绝（服务未监听？），不换 IP`
     );
@@ -129,13 +145,13 @@ async function checkIp(accountConfig, region, client, server) {
   // 疑似 TCP 层封锁：累计连续轮次
   const streakState = nextFailureStreak(tcpFailureStreaks.get(key) || 0, verdict, check);
   tcpFailureStreaks.set(key, streakState.streak);
-  log(
+  deps.log(
     "WARN",
     `${label} (${host}) Ping 通但 TCP(${check.ports.join(",")}) 无响应（第 ${streakState.streak}/${check.confirmRounds} 轮）`
   );
 
   if (!streakState.shouldRotate) {
-    log(
+    deps.log(
       "INFO",
       check.rotateOnTcpDown
         ? "未达到连续失败阈值，本轮不换 IP"
@@ -144,9 +160,12 @@ async function checkIp(accountConfig, region, client, server) {
     return { server, status: "reachable" };
   }
 
-  log("INFO", `${label} (${host}) 连续 ${streakState.streak} 轮 TCP 层不可达，开始更换 IP`);
+  deps.log(
+    "INFO",
+    `${label} (${host}) 连续 ${streakState.streak} 轮 TCP 层不可达，开始更换 IP`
+  );
   tcpFailureStreaks.delete(key);
-  return rotateIp(account, region, client, server, label, host);
+  return rotateIp(account, region, client, server, label, host, deps);
 }
 
 /**
