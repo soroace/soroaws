@@ -1,5 +1,6 @@
 const { exec } = require("child_process");
 const os = require("os");
+const net = require("net");
 
 /**
  * 调用系统 ping 命令检测指定主机（单次）
@@ -46,4 +47,61 @@ async function pingHost(host, seconds) {
   return false;
 }
 
-module.exports = { systemPing, pingHost };
+/**
+ * TCP 探测指定主机端口（单次）
+ * @param {string} host - 目标 IP 地址
+ * @param {number} port - 目标端口
+ * @param {number} [timeoutMs] - 连接超时（毫秒）
+ * @returns {Promise<{ok: boolean, reason: string}>} reason: connect/refused/timeout/reset/unreachable/error
+ */
+function tcpProbe(host, port, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let socket;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (socket) socket.destroy();
+      resolve(result);
+    };
+
+    socket = net.createConnection({ host, port });
+    socket.setTimeout(timeoutMs);
+
+    socket.once("connect", () => finish({ ok: true, reason: "connect" }));
+    socket.once("timeout", () => finish({ ok: false, reason: "timeout" }));
+    socket.once("error", (err) => {
+      const code = err && err.code;
+      if (code === "ECONNREFUSED") return finish({ ok: false, reason: "refused" });
+      if (code === "ECONNRESET") return finish({ ok: false, reason: "reset" });
+      if (code === "ETIMEDOUT") return finish({ ok: false, reason: "timeout" });
+      if (code === "ENETUNREACH" || code === "EHOSTUNREACH") {
+        return finish({ ok: false, reason: "unreachable" });
+      }
+      return finish({ ok: false, reason: "error" });
+    });
+  });
+}
+
+/**
+ * 依次探测多个端口，任一成功即提前结束
+ * @param {string} host - 目标 IP 地址
+ * @param {number[]} ports - 待探测端口
+ * @param {number} [timeoutMs] - 单端口连接超时（毫秒）
+ * @param {Function} [probe] - 探测函数（默认 tcpProbe，测试时可注入）
+ * @returns {Promise<Array<{port: number, ok: boolean, reason: string}>>}
+ */
+async function probeTcpPorts(host, ports, timeoutMs = 3000, probe = tcpProbe) {
+  const results = [];
+
+  for (const port of ports) {
+    const result = await probe(host, port, timeoutMs);
+    results.push({ port, ...result });
+    if (result.ok) break;
+  }
+
+  return results;
+}
+
+module.exports = { systemPing, pingHost, tcpProbe, probeTcpPorts };
