@@ -35,3 +35,25 @@ test("账号区域为空时不产生客户端", () => {
 
   assert.deepEqual(clients, []);
 });
+
+test("禁用账号不产生客户端", () => {
+  const clients = createClients([
+    {
+      name: "on",
+      enabled: true,
+      credentials: { accessKeyId: "A1", secretAccessKey: "S1" },
+      regions: ["us-east-1"],
+    },
+    {
+      name: "off",
+      enabled: false,
+      credentials: { accessKeyId: "A2", secretAccessKey: "S2" },
+      regions: ["us-east-1"],
+    },
+  ]);
+
+  assert.deepEqual(
+    clients.map((item) => item.account),
+    ["on"]
+  );
+});

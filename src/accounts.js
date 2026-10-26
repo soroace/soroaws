@@ -19,7 +19,7 @@ function resolveAccountsFile(filePath) {
 /**
  * 归一化并校验账号配置
  * @param {unknown} input - JSON 解析后的原始结构
- * @returns {{accounts: Array, errors: string[]}} accounts: [{name, credentials, regions}]
+ * @returns {{accounts: Array, errors: string[]}} accounts: [{name, enabled, credentials, regions}]
  */
 function normalizeAccounts(input) {
   if (!Array.isArray(input)) {
@@ -52,12 +52,26 @@ function normalizeAccounts(input) {
       seen.add(name);
     }
 
+    const enabled = item.enabled !== false;
+    if (item.enabled !== undefined && typeof item.enabled !== "boolean") {
+      errors.push(`${nameLabel}的 enabled 必须是布尔值`);
+    }
+
+    for (const field of ["accessKeyId", "secretAccessKey"]) {
+      if (item[field] !== undefined && typeof item[field] !== "string") {
+        errors.push(`${nameLabel}的 ${field} 必须是字符串`);
+      }
+    }
+
     const accessKeyId =
       typeof item.accessKeyId === "string" ? item.accessKeyId.trim() : "";
     const secretAccessKey =
       typeof item.secretAccessKey === "string" ? item.secretAccessKey.trim() : "";
-    if (!accessKeyId) errors.push(`${nameLabel}缺少 accessKeyId`);
-    if (!secretAccessKey) errors.push(`${nameLabel}缺少 secretAccessKey`);
+    // 禁用账号允许凭证为空（例如密钥已失效但想保留配置），启用账号必须填写
+    if (enabled) {
+      if (!accessKeyId) errors.push(`${nameLabel}缺少 accessKeyId`);
+      if (!secretAccessKey) errors.push(`${nameLabel}缺少 secretAccessKey`);
+    }
 
     const regions = Array.isArray(item.regions)
       ? [
@@ -68,7 +82,8 @@ function normalizeAccounts(input) {
           ),
         ]
       : [];
-    if (regions.length === 0) {
+    // 禁用账号允许 regions 为空（不参与检测），启用账号必须至少配置一个区域
+    if (enabled && regions.length === 0) {
       errors.push(`${nameLabel}的 regions 为空或格式不正确`);
     }
     const invalidRegion = regions.find((region) => !REGION_RE.test(region));
@@ -80,6 +95,7 @@ function normalizeAccounts(input) {
 
     accounts.push({
       name,
+      enabled,
       credentials: { accessKeyId, secretAccessKey },
       regions,
     });

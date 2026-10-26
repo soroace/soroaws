@@ -134,3 +134,49 @@ test("loadAccounts 兼容带 UTF-8 BOM 的文件", () => {
     fs.unlinkSync(file);
   }
 });
+
+test("enabled 缺省视为启用", () => {
+  const { accounts } = normalizeAccounts([
+    { name: "main", accessKeyId: "A", secretAccessKey: "S", regions: ["us-east-1"] },
+  ]);
+
+  assert.equal(accounts[0].enabled, true);
+});
+
+test("禁用账号允许空凭证和空区域", () => {
+  const { accounts, errors } = normalizeAccounts([{ name: "legacy", enabled: false }]);
+
+  assert.deepEqual(errors, []);
+  assert.equal(accounts[0].enabled, false);
+  assert.deepEqual(accounts[0].regions, []);
+});
+
+test("启用账号缺少凭证和区域仍报错", () => {
+  const { errors } = normalizeAccounts([{ name: "on", enabled: true }]);
+
+  assert.ok(errors.some((e) => e.includes("accessKeyId")));
+  assert.ok(errors.some((e) => e.includes("secretAccessKey")));
+  assert.ok(errors.some((e) => e.includes("regions")));
+});
+
+test("enabled 非布尔值报错", () => {
+  const { errors } = normalizeAccounts([
+    {
+      name: "x",
+      enabled: "false",
+      accessKeyId: "A",
+      secretAccessKey: "S",
+      regions: ["us-east-1"],
+    },
+  ]);
+
+  assert.ok(errors.some((e) => e.includes("enabled")));
+});
+
+test("禁用账号提供非法区域仍报错", () => {
+  const { errors } = normalizeAccounts([
+    { name: "x", enabled: false, regions: ["NOT_A_REGION"] },
+  ]);
+
+  assert.ok(errors.some((e) => e.includes("无效区域名")));
+});

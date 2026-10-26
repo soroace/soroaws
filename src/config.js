@@ -38,6 +38,12 @@ function validateConfig() {
   if (config.accounts.length === 0 && config.accountsErrors.length === 0) {
     errors.push("accounts.json 未配置任何账号");
   }
+  if (
+    config.accounts.length > 0 &&
+    !config.accounts.some((account) => account.enabled !== false)
+  ) {
+    errors.push("没有启用的账号（accounts.json 中所有账号 enabled 均为 false）");
+  }
 
   if (Number.isNaN(config.pingTimeout) || config.pingTimeout < 1) {
     errors.push("PING_TIMEOUT 不是有效的数字");

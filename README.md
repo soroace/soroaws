@@ -66,12 +66,14 @@ chmod 600 accounts.json
 [
   {
     "name": "main",
+    "enabled": true,
     "accessKeyId": "AKIA...",
     "secretAccessKey": "...",
     "regions": ["ap-northeast-1", "ap-northeast-2", "ap-southeast-1"]
   },
   {
     "name": "backup",
+    "enabled": false,
     "accessKeyId": "AKIA...",
     "secretAccessKey": "...",
     "regions": ["us-east-1"]
@@ -82,13 +84,15 @@ chmod 600 accounts.json
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | `name` | 是 | 账号标识，唯一，用于日志/通知；1-32 位字母/数字/下划线/连字符 |
-| `accessKeyId` | 是 | AWS 访问密钥 ID |
-| `secretAccessKey` | 是 | AWS 秘密访问密钥 |
-| `regions` | 是 | 该账号要检测的区域数组，如 `["ap-northeast-1"]` |
+| `enabled` | 否 | 默认 `true`；设为 `false` 时该账号完全不参与检测、换 IP 和清理，启动日志会标注"已跳过" |
+| `accessKeyId` | 是（禁用账号可空） | AWS 访问密钥 ID |
+| `secretAccessKey` | 是（禁用账号可空） | AWS 秘密访问密钥 |
+| `regions` | 是（禁用账号可空） | 该账号要检测的区域数组，如 `["ap-northeast-1"]` |
 
 > 每个「账号 + 区域」独立创建 AWS 客户端；换 IP 并发限制按「账号 + 区域」分别计算。
 > 账号必须是不同的 AWS 账号——同一账号的多套密钥会重复检测同一批实例并并发换 IP。
 > `accounts.json` 含密钥，不要提交到 git；可用 `AWS_ACCOUNTS_FILE` 指定其他路径。
+> 所有账号都设为 `enabled: false` 时程序会启动报错退出，不会静默空转。
 
 ### .env
 

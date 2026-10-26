@@ -18,17 +18,19 @@ const { log } = require("./logger");
  * @returns {Array<{account: string, region: string, client: object}>}
  */
 function createClients(accounts) {
-  return accounts.flatMap((account) =>
-    account.regions.map((region) => ({
-      account: account.name,
-      region,
-      client: new LightsailClient({
+  return accounts
+    .filter((account) => account.enabled !== false)
+    .flatMap((account) =>
+      account.regions.map((region) => ({
+        account: account.name,
         region,
-        credentials: account.credentials,
-        maxAttempts: 3,
-      }),
-    }))
-  );
+        client: new LightsailClient({
+          region,
+          credentials: account.credentials,
+          maxAttempts: 3,
+        }),
+      }))
+    );
 }
 
 const clients = createClients(config.accounts);

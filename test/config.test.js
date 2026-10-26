@@ -89,3 +89,16 @@ test("没有账号且无解析错误时仍报错", () => {
 
   assert.ok(errors.some((e) => e.includes("未配置任何账号")));
 });
+
+test("全部账号禁用时报错", () => {
+  const errors = withConfig(
+    {
+      accounts: [{ ...validAccount, enabled: false }],
+      accountsErrors: [],
+      ...validNumbers,
+    },
+    () => config.validateConfig()
+  );
+
+  assert.ok(errors.some((e) => e.includes("没有启用的账号")));
+});

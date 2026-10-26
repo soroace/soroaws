@@ -205,11 +205,15 @@ function logChannels() {
 async function main() {
   log("INFO", `soroaws 启动，检测间隔: ${config.interval} 分钟`);
   log("INFO", `探测方式: 本机持续 Ping 实例公网 IP，最长 ${config.pingTimeout} 秒，有任一回复即视为可达`);
+  const enabledAccounts = config.accounts.filter((account) => account.enabled !== false);
+  const disabledAccounts = config.accounts.filter((account) => account.enabled === false);
+
   log("INFO", `账号配置: ${config.accountsFile}`);
-  log(
-    "INFO",
-    `已加载 ${config.accounts.length} 个账号（${config.accounts.map((a) => a.name).join(", ")}），共 ${clients.length} 个账号/区域客户端`
-  );
+  log("INFO", `启用账号: ${enabledAccounts.map((a) => a.name).join(", ") || "无"}`);
+  if (disabledAccounts.length > 0) {
+    log("INFO", `禁用账号（已跳过）: ${disabledAccounts.map((a) => a.name).join(", ")}`);
+  }
+  log("INFO", `共 ${clients.length} 个账号/区域客户端参与检测`);
   logChannels();
 
   // 启动时先清理一次未附加静态 IP
