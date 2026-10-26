@@ -22,6 +22,7 @@ test("按「账号 × 区域」展开客户端", () => {
     ["main/ap-northeast-1", "main/ap-southeast-1", "backup/us-east-1"]
   );
   assert.equal(clients[0].client.constructor.name, "LightsailClient");
+  assert.equal(clients[0].accountConfig.name, "main");
 });
 
 test("账号区域为空时不产生客户端", () => {

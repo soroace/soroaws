@@ -5,6 +5,14 @@ const ROOT = path.resolve(__dirname, "..");
 const DEFAULT_FILE = path.join(ROOT, "accounts.json");
 const REGION_RE = /^[a-z]{2}(-[a-z]+)+-\d+$/;
 const NAME_RE = /^[a-zA-Z0-9_-]{1,32}$/;
+const CHECK_MODES = ["ping", "ping+tcp"];
+const DEFAULT_CHECK = {
+  mode: "ping",
+  ports: [],
+  tcpTimeoutMs: 3000,
+  confirmRounds: 2,
+  rotateOnTcpDown: false,
+};
 
 /**
  * 将 AWS_ACCOUNTS_FILE 解析为绝对路径（相对路径按项目根解析）
@@ -17,9 +25,92 @@ function resolveAccountsFile(filePath) {
 }
 
 /**
+ * 归一化并校验单个账号的 check（检测方式）配置
+ * @param {unknown} raw - accounts.json 中的 check 字段
+ * @param {string} nameLabel - 用于错误信息的账号标识
+ * @returns {{check: object, errors: string[]}}
+ */
+function normalizeCheck(raw, nameLabel) {
+  const check = { ...DEFAULT_CHECK, ports: [] };
+
+  if (raw === undefined) return { check, errors: [] };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { check, errors: [`${nameLabel}的 check 必须是对象`] };
+  }
+
+  const errors = [];
+
+  if (raw.mode !== undefined) {
+    if (!CHECK_MODES.includes(raw.mode)) {
+      errors.push(`${nameLabel}的 check.mode 必须是 ${CHECK_MODES.join(" / ")}`);
+    } else {
+      check.mode = raw.mode;
+    }
+  }
+
+  if (raw.ports !== undefined) {
+    if (!Array.isArray(raw.ports) || raw.ports.length === 0) {
+      errors.push(`${nameLabel}的 check.ports 必须是非空数组`);
+    } else {
+      const ports = [...new Set(raw.ports)];
+      const invalidPort = ports.find(
+        (port) => !Number.isInteger(port) || port < 1 || port > 65535
+      );
+      if (invalidPort !== undefined) {
+        errors.push(
+          `${nameLabel}的 check.ports 含无效端口 "${invalidPort}"（应为 1-65535 的整数）`
+        );
+      } else {
+        check.ports = ports;
+      }
+    }
+  }
+
+  if (check.mode !== "ping" && check.ports.length === 0 && raw.ports === undefined) {
+    errors.push(
+      `${nameLabel}启用 TCP 检测（check.mode=${check.mode}）时必须配置 check.ports`
+    );
+  }
+
+  if (raw.tcpTimeoutMs !== undefined) {
+    if (
+      !Number.isInteger(raw.tcpTimeoutMs) ||
+      raw.tcpTimeoutMs < 100 ||
+      raw.tcpTimeoutMs > 30000
+    ) {
+      errors.push(`${nameLabel}的 check.tcpTimeoutMs 必须是 100-30000 的整数`);
+    } else {
+      check.tcpTimeoutMs = raw.tcpTimeoutMs;
+    }
+  }
+
+  if (raw.confirmRounds !== undefined) {
+    if (
+      !Number.isInteger(raw.confirmRounds) ||
+      raw.confirmRounds < 1 ||
+      raw.confirmRounds > 10
+    ) {
+      errors.push(`${nameLabel}的 check.confirmRounds 必须是 1-10 的整数`);
+    } else {
+      check.confirmRounds = raw.confirmRounds;
+    }
+  }
+
+  if (raw.rotateOnTcpDown !== undefined) {
+    if (typeof raw.rotateOnTcpDown !== "boolean") {
+      errors.push(`${nameLabel}的 check.rotateOnTcpDown 必须是布尔值`);
+    } else {
+      check.rotateOnTcpDown = raw.rotateOnTcpDown;
+    }
+  }
+
+  return { check, errors };
+}
+
+/**
  * 归一化并校验账号配置
  * @param {unknown} input - JSON 解析后的原始结构
- * @returns {{accounts: Array, errors: string[]}} accounts: [{name, enabled, credentials, regions}]
+ * @returns {{accounts: Array, errors: string[]}} accounts: [{name, enabled, credentials, regions, check}]
  */
 function normalizeAccounts(input) {
   if (!Array.isArray(input)) {
@@ -93,11 +184,15 @@ function normalizeAccounts(input) {
       );
     }
 
+    const { check, errors: checkErrors } = normalizeCheck(item.check, nameLabel);
+    errors.push(...checkErrors);
+
     accounts.push({
       name,
       enabled,
       credentials: { accessKeyId, secretAccessKey },
       regions,
+      check,
     });
   });
 
@@ -143,4 +238,5 @@ module.exports = {
   loadAccounts,
   normalizeAccounts,
   resolveAccountsFile,
+  DEFAULT_CHECK,
 };

@@ -94,6 +94,32 @@ chmod 600 accounts.json
 > `accounts.json` 含密钥，不要提交到 git；可用 `AWS_ACCOUNTS_FILE` 指定其他路径。
 > 所有账号都设为 `enabled: false` 时程序会启动报错退出，不会静默空转。
 
+#### check（可选，检测方式）
+
+不写时默认纯 ping，与旧行为一致。需要覆盖"ping 通但 TCP 端口被墙"的场景时：
+
+```json
+"check": {
+  "mode": "ping+tcp",
+  "ports": [22],
+  "tcpTimeoutMs": 3000,
+  "confirmRounds": 2,
+  "rotateOnTcpDown": false
+}
+```
+
+| 字段 | 默认 | 说明 |
+|------|------|------|
+| `mode` | `ping` | `ping`（只测 ICMP）或 `ping+tcp`（ping 通后再测 TCP） |
+| `ports` | - | 启用 TCP 检测时必填；单个端口如 `[22]`，多个端口如 `[22, 443]`；1-65535 整数，任一端口握手成功即算 TCP 通 |
+| `tcpTimeoutMs` | `3000` | 单个端口的连接超时（100-30000） |
+| `confirmRounds` | `2` | 连续多少轮 TCP 无响应才触发换 IP（1-10） |
+| `rotateOnTcpDown` | `false` | 是否允许因 TCP 无响应而换 IP；建议先 false 观察 24 小时再开启 |
+
+> TCP 结果区分两种情况：端口返回 `ECONNREFUSED`（服务没监听，**不换 IP**）和连接超时/无响应（疑似封锁，连续 `confirmRounds` 轮才换）。
+> 端口建议填业务实际端口（如 SSH `22` 或代理端口）；多个端口写成数组 `"ports": [22, 443]`，任一成功即算通；如果只想检测某个业务端口，只填那一个。
+> 观察到 "Ping 通但 TCP 无响应" 日志后，建议先对照实例的实际可用性确认误报情况，再决定是否开启 `rotateOnTcpDown`。
+
 ### .env
 
 | 变量 | 必填 | 默认值 | 说明 |

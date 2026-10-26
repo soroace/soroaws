@@ -6,51 +6,33 @@ const {
   allocateStaticIp,
   attachStaticIp,
 } = require("./lightsail");
-const { pingHost } = require("./checker");
+const { pingHost, probeTcpPorts } = require("./checker");
+const { classify, nextFailureStreak, VERDICT } = require("./detector");
 const { notifyIpChange } = require("./notifier");
 const { getRegionLimiter } = require("./limiter");
 const { log } = require("./logger");
 const config = require("./config");
+const { DEFAULT_CHECK } = require("./accounts");
+
+// TCP 连续失败轮次（key = 账号|区域|实例名），跨轮保存在内存
+const tcpFailureStreaks = new Map();
 
 /**
- * 检测指定实例链路，不可达时自动更换 IP
- * @param {string} account - 账号名
- * @param {string} region - 区域
- * @param {object} client - 该账号/区域的 AWS 客户端
- * @param {object} server - 实例对象
- * @returns {Promise<{server: object, status: "reachable"|"changed"|"failed"|"skipped"}>}
+ * 清理已不存在实例的连续失败计数，避免 Map 无限增长
+ * @param {string[]} activeKeys - 本轮存在的实例 key
  */
-async function checkIp(account, region, client, server) {
-  const host = server.publicIpAddress;
-  const instanceState = server.state?.name || "未知";
-  const label = `${account}/${server.name}`;
-
-  // 已停止/无公网 IP 的实例 Ping 必然失败，直接跳过，不触发换 IP
-  if (!host || instanceState !== "running") {
-    log("INFO", `${label} 状态为 ${instanceState}${host ? "" : "、无公网 IP"}，跳过检测`);
-    return { server, status: "skipped" };
+function pruneTcpFailureStreaks(activeKeys) {
+  const active = new Set(activeKeys);
+  for (const key of tcpFailureStreaks.keys()) {
+    if (!active.has(key)) tcpFailureStreaks.delete(key);
   }
+}
 
-  log("INFO", `正在检查 ${label} (${host}) 连通性`);
-
-  let reachable;
+/**
+ * 执行换 IP（经区域限流器排队）
+ */
+async function rotateIp(account, region, client, server, label, host) {
   try {
-    reachable = await pingHost(host, config.pingTimeout);
-  } catch (err) {
-    log("ERROR", `${label} (${host}) 连通性检测异常: ${err.message}`);
-    return { server, status: "failed" };
-  }
-
-  if (reachable) {
-    log("INFO", `${label} (${host}) Ping 通，跳过本轮检测`);
-    return { server, status: "reachable" };
-  }
-
-  log("WARN", `${label} (${host}) 持续 ${config.pingTimeout} 秒 Ping 无回复`);
-  log("INFO", `${label} (${host}) 判定为不可达，开始更换 IP`);
-
-  try {
-    // 换 IP 操作经区域限制器排队执行，控制同时进行的更换数量
     const runRotate = getRegionLimiter(client);
     await runRotate(async () => {
       if (server.isStaticIp) {
@@ -64,6 +46,107 @@ async function checkIp(account, region, client, server) {
     log("ERROR", `${label} (${host}) IP更换失败: ${err.message}`);
     return { server, status: "failed" };
   }
+}
+
+/**
+ * 检测指定实例链路，不可达时自动更换 IP
+ * 支持纯 ping 与 ping+tcp 两种检测方式（账号的 check 配置）
+ * @param {object} accountConfig - 账号配置（含 name 与 check）
+ * @param {string} region - 区域
+ * @param {object} client - 该账号/区域的 AWS 客户端
+ * @param {object} server - 实例对象
+ * @returns {Promise<{server: object, status: "reachable"|"changed"|"failed"|"skipped"}>}
+ */
+async function checkIp(accountConfig, region, client, server) {
+  const account = accountConfig.name;
+  const check = accountConfig.check || DEFAULT_CHECK;
+  const host = server.publicIpAddress;
+  const instanceState = server.state?.name || "未知";
+  const label = `${account}/${server.name}`;
+
+  // 已停止/无公网 IP 的实例 Ping 必然失败，直接跳过，不触发换 IP
+  if (!host || instanceState !== "running") {
+    log("INFO", `${label} 状态为 ${instanceState}${host ? "" : "、无公网 IP"}，跳过检测`);
+    return { server, status: "skipped" };
+  }
+
+  log("INFO", `正在检查 ${label} (${host}) 连通性`);
+
+  let pingReachable;
+  try {
+    pingReachable = await pingHost(host, config.pingTimeout);
+  } catch (err) {
+    log("ERROR", `${label} (${host}) 连通性检测异常: ${err.message}`);
+    return { server, status: "failed" };
+  }
+
+  // 纯 ping 模式：与原行为完全一致
+  if (check.mode === "ping") {
+    if (pingReachable) {
+      log("INFO", `${label} (${host}) Ping 通，跳过本轮检测`);
+      return { server, status: "reachable" };
+    }
+
+    log("WARN", `${label} (${host}) 持续 ${config.pingTimeout} 秒 Ping 无回复`);
+    log("INFO", `${label} (${host}) 判定为不可达，开始更换 IP`);
+    return rotateIp(account, region, client, server, label, host);
+  }
+
+  // ping+tcp 模式：ping 不通时沿用原逻辑（直接换 IP）
+  if (!pingReachable) {
+    log("WARN", `${label} (${host}) 持续 ${config.pingTimeout} 秒 Ping 无回复`);
+    log("INFO", `${label} (${host}) 判定为不可达，开始更换 IP`);
+    return rotateIp(account, region, client, server, label, host);
+  }
+
+  const key = `${account}|${region}|${server.name}`;
+
+  let tcpResults;
+  try {
+    tcpResults = await probeTcpPorts(host, check.ports, check.tcpTimeoutMs);
+  } catch (err) {
+    log("ERROR", `${label} (${host}) TCP 探测异常，本轮不换 IP: ${err.message}`);
+    return { server, status: "reachable" };
+  }
+
+  const verdict = classify({ pingReachable: true, tcpResults });
+
+  if (verdict === VERDICT.OK) {
+    tcpFailureStreaks.delete(key);
+    log("INFO", `${label} (${host}) Ping 通，TCP 正常，跳过本轮检测`);
+    return { server, status: "reachable" };
+  }
+
+  if (verdict === VERDICT.REFUSED) {
+    tcpFailureStreaks.delete(key);
+    log(
+      "WARN",
+      `${label} (${host}) Ping 通但 TCP(${check.ports.join(",")}) 全部被拒绝（服务未监听？），不换 IP`
+    );
+    return { server, status: "reachable" };
+  }
+
+  // 疑似 TCP 层封锁：累计连续轮次
+  const streakState = nextFailureStreak(tcpFailureStreaks.get(key) || 0, verdict, check);
+  tcpFailureStreaks.set(key, streakState.streak);
+  log(
+    "WARN",
+    `${label} (${host}) Ping 通但 TCP(${check.ports.join(",")}) 无响应（第 ${streakState.streak}/${check.confirmRounds} 轮）`
+  );
+
+  if (!streakState.shouldRotate) {
+    log(
+      "INFO",
+      check.rotateOnTcpDown
+        ? "未达到连续失败阈值，本轮不换 IP"
+        : "未开启 check.rotateOnTcpDown，仅记录不换 IP"
+    );
+    return { server, status: "reachable" };
+  }
+
+  log("INFO", `${label} (${host}) 连续 ${streakState.streak} 轮 TCP 层不可达，开始更换 IP`);
+  tcpFailureStreaks.delete(key);
+  return rotateIp(account, region, client, server, label, host);
 }
 
 /**
@@ -169,4 +252,4 @@ async function allocateAndAttach(account, region, client, server) {
   });
 }
 
-module.exports = { checkIp, rotateStaticIp, allocateAndAttach };
+module.exports = { checkIp, rotateStaticIp, allocateAndAttach, pruneTcpFailureStreaks };

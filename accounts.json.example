@@ -4,7 +4,14 @@
     "enabled": true,
     "accessKeyId": "YOUR_ACCESS_KEY_ID",
     "secretAccessKey": "YOUR_SECRET_ACCESS_KEY",
-    "regions": ["ap-northeast-1", "ap-northeast-2", "ap-southeast-1"]
+    "regions": ["ap-northeast-1", "ap-northeast-2", "ap-southeast-1"],
+    "check": {
+      "mode": "ping+tcp",
+      "ports": [22],
+      "tcpTimeoutMs": 3000,
+      "confirmRounds": 2,
+      "rotateOnTcpDown": false
+    }
   },
   {
     "name": "backup",

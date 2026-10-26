@@ -23,6 +23,7 @@ function createClients(accounts) {
     .flatMap((account) =>
       account.regions.map((region) => ({
         account: account.name,
+        accountConfig: account,
         region,
         client: new LightsailClient({
           region,

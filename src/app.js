@@ -1,5 +1,5 @@
 const { clients, fetchInstances, cleanupUnattachedIps } = require("./lightsail");
-const { checkIp } = require("./rotate");
+const { checkIp, pruneTcpFailureStreaks } = require("./rotate");
 const { log } = require("./logger");
 const config = require("./config");
 
@@ -13,12 +13,19 @@ const config = require("./config");
  */
 async function fetchAllInstances() {
   const results = await Promise.all(
-    clients.map(async ({ account, region, client }) => {
+    clients.map(async ({ account, accountConfig, region, client }) => {
       try {
-        return { account, region, client, ok: true, servers: await fetchInstances(client) };
+        return {
+          account,
+          accountConfig,
+          region,
+          client,
+          ok: true,
+          servers: await fetchInstances(client),
+        };
       } catch (err) {
         log("ERROR", `获取实例列表失败 (${account}/${region}): ${err.message}`);
-        return { account, region, ok: false };
+        return { account, accountConfig, region, ok: false };
       }
     })
   );
@@ -31,6 +38,7 @@ async function fetchAllInstances() {
       for (const server of result.servers) {
         instances.push({
           account: result.account,
+          accountConfig: result.accountConfig,
           region: result.region,
           client: result.client,
           server,
@@ -69,8 +77,8 @@ async function getInstances() {
     }
 
     const checkResults = await Promise.allSettled(
-      instances.map(({ account, region, client, server }) =>
-        checkIp(account, region, client, server)
+      instances.map(({ accountConfig, region, client, server }) =>
+        checkIp(accountConfig, region, client, server)
       )
     );
 
@@ -82,6 +90,11 @@ async function getInstances() {
         stats.failed++;
       }
     }
+
+    // 清理已不存在实例的 TCP 连续失败计数
+    pruneTcpFailureStreaks(
+      instances.map(({ account, region, server }) => `${account}|${region}|${server.name}`)
+    );
 
     const failureNote = failures > 0 ? `, ${failures} 个账号/区域拉取失败` : "";
     log(

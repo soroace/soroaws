@@ -180,3 +180,82 @@ test("禁用账号提供非法区域仍报错", () => {
 
   assert.ok(errors.some((e) => e.includes("无效区域名")));
 });
+
+test("check 缺省为纯 ping", () => {
+  const { accounts } = normalizeAccounts([
+    { name: "m", accessKeyId: "A", secretAccessKey: "S", regions: ["us-east-1"] },
+  ]);
+
+  assert.deepEqual(accounts[0].check, {
+    mode: "ping",
+    ports: [],
+    tcpTimeoutMs: 3000,
+    confirmRounds: 2,
+    rotateOnTcpDown: false,
+  });
+});
+
+test("check 配置正常解析（端口去重）", () => {
+  const { accounts, errors } = normalizeAccounts([
+    {
+      name: "m",
+      accessKeyId: "A",
+      secretAccessKey: "S",
+      regions: ["us-east-1"],
+      check: {
+        mode: "ping+tcp",
+        ports: [22, 22, 443],
+        tcpTimeoutMs: 2000,
+        confirmRounds: 3,
+        rotateOnTcpDown: true,
+      },
+    },
+  ]);
+
+  assert.deepEqual(errors, []);
+  assert.deepEqual(accounts[0].check, {
+    mode: "ping+tcp",
+    ports: [22, 443],
+    tcpTimeoutMs: 2000,
+    confirmRounds: 3,
+    rotateOnTcpDown: true,
+  });
+});
+
+test("ping+tcp 未配置 ports 报错", () => {
+  const { errors } = normalizeAccounts([
+    {
+      name: "m",
+      accessKeyId: "A",
+      secretAccessKey: "S",
+      regions: ["us-east-1"],
+      check: { mode: "ping+tcp" },
+    },
+  ]);
+
+  assert.ok(errors.some((e) => e.includes("check.ports")));
+});
+
+test("check 非法字段报错", () => {
+  const { errors } = normalizeAccounts([
+    {
+      name: "m",
+      accessKeyId: "A",
+      secretAccessKey: "S",
+      regions: ["us-east-1"],
+      check: {
+        mode: "tcp",
+        ports: [0, 70000],
+        tcpTimeoutMs: 99999,
+        confirmRounds: 0,
+        rotateOnTcpDown: "yes",
+      },
+    },
+  ]);
+
+  assert.ok(errors.some((e) => e.includes("check.mode")));
+  assert.ok(errors.some((e) => e.includes("check.ports")));
+  assert.ok(errors.some((e) => e.includes("tcpTimeoutMs")));
+  assert.ok(errors.some((e) => e.includes("confirmRounds")));
+  assert.ok(errors.some((e) => e.includes("rotateOnTcpDown")));
+});
