@@ -168,8 +168,9 @@ pm2 stop soroaws        # 停止
 
 ## 日志
 
-所有日志统一写入项目根目录的 `logs/soroaws.log` 文件，同时输出到控制台。
-IP 更换事件（`CHANGE` 级别）会额外单独记录到 `logs/changes.log` 文件，便于快速检索更换历史。
+所有日志统一写入项目根目录的 `logs/soroaws.log`，同时输出到控制台。
+IP 更换事件（`CHANGE` 级别）会额外记录到 `logs/changes.log`。
+多账号时，日志里的实例名带账号前缀，例如 `main/my-instance`。
 
 ### 日志级别
 
