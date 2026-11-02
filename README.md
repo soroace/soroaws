@@ -98,7 +98,7 @@ chmod 600 accounts.json
 
 #### check（可选，检测方式）
 
-不写时默认纯 ping，与旧行为一致。需要覆盖"ping 通但 TCP 端口被墙"的场景时：
+不写时默认只做 ping（ICMP）检测。需要覆盖"ping 通但 TCP 端口被墙"的场景时，在账号对象内加：
 
 ```json
 "check": {
@@ -136,11 +136,11 @@ chmod 600 accounts.json
 
 ## 通知
 
-通过 **Server酱** 推送 IP 更换结果。未配置 `SERVER_CHAN_TOKEN` 时程序照常运行，仅不推送，启动日志会以 `WARN` 提示。
+通过 **Server酱** 推送 IP 更换结果（可选，未配置 `SERVER_CHAN_TOKEN` 时不推送）。注意：目前只有分配/绑定静态 IP 失败会推送失败告警，解绑/释放失败只记录日志。
 
 | 通知类型 | 触发时机 |
 |----------|----------|
-| AWS Lightsail IP 更换 | 本程序自动更换成功 / 失败（失败时标题带 `【失败】` 并附原因） |
+| AWS Lightsail IP 更换 | 本程序自动更换成功 / 失败（分配或绑定失败时标题带 `【失败】` 并附原因） |
 
 > 推送请求带 10 秒超时：Server酱 接口挂起时不会永久占住区域并发限制器槽位、卡死该区域后续换 IP。
 
@@ -166,15 +166,12 @@ pm2 restart soroaws     # 重启
 pm2 stop soroaws        # 停止
 ```
 
-> ⚠️ 若之前用旧进程名（`pulsex`）跑过，务必先 `pm2 delete pulsex` 再按上面的命令启动，否则新旧两个进程会同时运行、互相干扰地换 IP。
-
 ## 日志
 
 所有日志统一写入项目根目录的 `logs/soroaws.log` 文件，同时输出到控制台。
 IP 更换事件（`CHANGE` 级别）会额外单独记录到 `logs/changes.log` 文件，便于快速检索更换历史。
 
 > `logs/` 目录在启动时自动创建（不存在也没关系），内容不纳入 git。
-> 2026-09 之前版本使用的日志文件名为 `lightsail.log`，新版本不再使用。
 > 多账号时，日志里的实例名带账号前缀，形如 `main/my-instance`。
 
 ### 日志级别
@@ -191,13 +188,16 @@ IP 更换事件（`CHANGE` 级别）会额外单独记录到 `logs/changes.log` 
 ```
 [2026/6/3 12:00:00] [INFO] soroaws 启动，检测间隔: 1 分钟
 [2026/6/3 12:00:00] [INFO] 探测方式: 本机持续 Ping 实例公网 IP，最长 15 秒，有任一回复即视为可达
+[2026/6/3 12:00:00] [INFO] 账号配置: /path/accounts.json
+[2026/6/3 12:00:00] [INFO] 启用账号: main, backup
+[2026/6/3 12:00:00] [INFO] 共 3 个账号/区域客户端参与检测
 [2026/6/3 12:00:00] [INFO] 开始新一轮 IP 检查
-[2026/6/3 12:00:01] [INFO] 正在检查 my-instance (1.2.3.4) 连通性
-[2026/6/3 12:00:03] [INFO] my-instance (1.2.3.4) Ping 通，跳过本轮检测
-[2026/6/3 12:02:30] [WARN] my-instance-2 (5.6.7.8) 持续 15 秒 Ping 无回复
-[2026/6/3 12:02:30] [INFO] my-instance-2 (5.6.7.8) 判定为不可达，开始更换 IP
-[2026/6/3 12:02:31] [INFO] 正在解绑静态 IP: my-instance-2-1685765000000 (5.6.7.8)
-[2026/6/3 12:02:33] [CHANGE] my-instance-2 IP已更换 5.6.7.8 → 9.10.11.12
+[2026/6/3 12:00:01] [INFO] 正在检查 main/my-instance (1.2.3.4) 连通性
+[2026/6/3 12:00:03] [INFO] main/my-instance (1.2.3.4) Ping 通，跳过本轮检测
+[2026/6/3 12:02:30] [WARN] main/my-instance-2 (5.6.7.8) 持续 15 秒 Ping 无回复
+[2026/6/3 12:02:30] [INFO] main/my-instance-2 (5.6.7.8) 判定为不可达，开始更换 IP
+[2026/6/3 12:02:31] [INFO] [main/ap-northeast-1] 正在解绑静态 IP: my-instance-2-1685765000000 (5.6.7.8)
+[2026/6/3 12:02:33] [CHANGE] main/my-instance-2 IP已更换 5.6.7.8 → 9.10.11.12
 [2026/6/3 12:02:34] [INFO] 本轮检查完成: 1 个可达, 1 个已更换, 0 个失败, 0 个跳过
 ```
 
@@ -228,7 +228,7 @@ soroaws/
 │   ├── rotate.js      # 换 IP 流程（checkIp / 静态 IP 轮换 / 分配绑定）
 │   ├── limiter.js     # 按「账号 + 区域」并发限制器
 │   ├── lightsail.js   # AWS Lightsail API 操作封装
-│   ├── checker.js     # 本机 Ping 连通性检测
+│   ├── checker.js     # Ping / TCP 连通性探测
 │   ├── config.js      # 运行参数读取与校验
 │   ├── logger.js      # 本地日志记录（写入 logs/）
 │   └── notifier.js    # 消息通知（Server酱，可选）
@@ -240,6 +240,8 @@ soroaws/
 ```
 
 ## 支持的区域
+
+> 以 AWS Lightsail 官方文档为准；实际可用性取决于账号与区域。
 
 - us-east-2, us-east-1, us-west-2
 - ap-south-1, ap-northeast-2, ap-southeast-1, ap-southeast-2, ap-northeast-1
