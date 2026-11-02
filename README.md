@@ -93,7 +93,7 @@ chmod 600 accounts.json
 
 > 每个「账号 + 区域」独立创建 AWS 客户端；换 IP 并发限制按「账号 + 区域」分别计算。
 > 账号必须是不同的 AWS 账号——同一账号的多套密钥会重复检测同一批实例并并发换 IP。
-> `accounts.json` 含密钥，不要提交到 git；可用 `AWS_ACCOUNTS_FILE` 指定其他路径。
+> `accounts.json` 含密钥，注意文件权限（600）；可用 `AWS_ACCOUNTS_FILE` 指定其他路径。
 > 所有账号都设为 `enabled: false` 时程序会启动报错退出，不会静默空转。
 
 #### check（可选，检测方式）
@@ -171,9 +171,6 @@ pm2 stop soroaws        # 停止
 所有日志统一写入项目根目录的 `logs/soroaws.log` 文件，同时输出到控制台。
 IP 更换事件（`CHANGE` 级别）会额外单独记录到 `logs/changes.log` 文件，便于快速检索更换历史。
 
-> `logs/` 目录在启动时自动创建（不存在也没关系），内容不纳入 git。
-> 多账号时，日志里的实例名带账号前缀，形如 `main/my-instance`。
-
 ### 日志级别
 
 | 级别 | 用途 | 筛选命令 |
@@ -201,26 +198,12 @@ IP 更换事件（`CHANGE` 级别）会额外单独记录到 `logs/changes.log` 
 [2026/6/3 12:02:34] [INFO] 本轮检查完成: 1 个可达, 1 个已更换, 0 个失败, 0 个跳过
 ```
 
-### 日志轮转
-
-日志不会自动清理，长期运行建议配置 logrotate（路径按实际部署目录替换）：
-
-```
-/path/to/soroaws/logs/*.log {
-    daily
-    rotate 14
-    compress
-    missingok
-    notifempty
-}
-```
-
 ## 项目结构
 
 ```
 soroaws/
 ├── index.js           # 入口：加载 src/app 并启动（pm2 启动路径不变）
-├── accounts.json      # AWS 账号配置（含密钥，不入库，部署时创建）
+├── accounts.json      # AWS 账号配置（含密钥，部署时创建）
 ├── accounts.json.example  # 账号配置模板
 ├── src/
 │   ├── app.js         # 启动、轮次调度、清理、优雅退出
@@ -233,7 +216,7 @@ soroaws/
 │   ├── logger.js      # 本地日志记录（写入 logs/）
 │   └── notifier.js    # 消息通知（Server酱，可选）
 ├── test/              # 单元测试（node:test）
-├── logs/              # 运行时日志（启动时自动创建，内容不入库）
+├── logs/              # 运行时日志（自动创建）
 ├── .env.example       # 环境变量模板
 ├── package.json
 └── README.md
